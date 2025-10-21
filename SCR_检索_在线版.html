@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCR 成套业绩检索 · 在线版（直接导入 .xlsx）</title>
+<style>
+*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,'Noto Sans','PingFang SC','Hiragino Sans GB','Microsoft Yahei',sans-serif;margin:0;background:#f7f7fb;color:#111}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#0f172a;color:#fff;position:sticky;top:0;z-index:10}
+h1{font-size:18px;margin:0}
+.btn{background:#e2e8f0;border:none;padding:8px 12px;border-radius:10px;cursor:pointer}
+.btn.primary{background:#4f46e5;color:#fff}
+.btn.ghost{background:transparent;border:1px solid #94a3b8;color:#e2e8f0}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.filters{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:12px 16px}
+.filter label{display:block;font-size:12px;color:#555;margin-bottom:6px}
+.filter input[type='text'], .filter input[type='number'], .filter select{width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+.filter .range{display:flex;align-items:center;gap:8px}
+.filter.actions{display:flex;align-items:end;gap:8px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:0 16px 12px}
+.stat-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:10px}
+.stat-title{font-size:12px;color:#64748b}
+.stat-value{font-size:20px;font-weight:700;margin-top:6px}
+.table-wrap{padding:0 16px 32px}
+table{width:100%;border-collapse:separate;border-spacing:0 6px}
+thead th{position:sticky;top:64px;background:#f7f7fb;padding:8px 10px;font-weight:600;color:#334155;border-bottom:1px solid #cbd5e1;cursor:pointer}
+tbody td{background:#fff;padding:8px 10px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
+tbody tr td:first-child, thead th:first-child{position:sticky;left:0;background:inherit}
+tbody tr{box-shadow:0 1px 0 rgba(0,0,0,.03)}
+tbody tr:hover td{background:#fafafa}
+footer{padding:12px 16px;border-top:1px solid #e2e8f0;color:#64748b}
+.alert{margin:12px 16px;padding:10px;border-radius:10px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b}
+.tip{margin:12px 16px;padding:10px;border-radius:10px;border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46}
+@media(max-width:1000px){.filters{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr 1fr}}
+</style>
+
+<!-- Auto-load SheetJS from multiple CDNs so XLSX is ready without user action -->
+<script>
+(function(){
+  const CDNS=[
+    "https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js",
+    "https://unpkg.com/xlsx@0.20.3/dist/xlsx.full.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.20.3/xlsx.full.min.js"
+  ];
+  let i=0;
+  function next(){
+    if (window.XLSX){ window.dispatchEvent(new Event('XLSX:ready')); return; }
+    if (i>=CDNS.length){ console.error("无法加载 XLSX 库，可能被网络拦截"); return; }
+    const s=document.createElement('script'); s.src=CDNS[i++];
+    s.onload=()=>window.XLSX?window.dispatchEvent(new Event('XLSX:ready')):next();
+    s.onerror=next;
+    document.head.appendChild(s);
+  }
+  next();
+})();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <h1>SCR 成套业绩检索 · 在线版（直接导入 .xlsx）</h1>
+  <div class="controls">
+    <label class="btn ghost">
+      导入Excel/CSV
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
+    </label>
+    <button id="downloadPageBtn" class="btn">下载嵌入数据的新页面</button>
+    <button id="exportCsvBtn" class="btn">导出当前结果CSV</button>
+    <button id="exportPivotBtn" class="btn">导出透视表CSV</button>
+  </div>
+</header>
+
+<section id="alert" class="alert" hidden></section>
+<section id="tip" class="tip" hidden></section>
+
+<section class="filters">
+  <div class="filter">
+    <label>机型</label>
+    <input type="text" id="modelInput" placeholder="如：6UEC33（模糊匹配）">
+  </div>
+  <div class="filter">
+    <label>功率范围 (kWm)</label>
+    <div class="range">
+      <input type="number" id="powerMin" placeholder="最小">
+      <span>—</span>
+      <input type="number" id="powerMax" placeholder="最大">
+    </div>
+  </div>
+  <div class="filter">
+    <label>品牌（多选）</label>
+    <select id="brandSelect" multiple></select>
+  </div>
+  <div class="filter">
+    <label>船级社（多选）</label>
+    <select id="classSelect" multiple></select>
+  </div>
+  <div class="filter actions">
+    <button id="applyBtn" class="btn primary">应用筛选</button>
+    <button id="resetBtn" class="btn">重置</button>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="stat-card"><div class="stat-title">记录条数</div><div class="stat-value" id="statRows">0</div></div>
+  <div class="stat-card"><div class="stat-title">合计数量(Σ数量)</div><div class="stat-value" id="statQty">0</div></div>
+  <div class="stat-card"><div class="stat-title">品牌Top5(按Σ数量)</div><ul id="statBrandTop"></ul></div>
+  <div class="stat-card"><div class="stat-title">机型Top5(按Σ数量)</div><ul id="statModelTop"></ul></div>
+</section>
+
+<section class="table-wrap">
+  <table id="dataTable">
+    <thead id="tableHead"></thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</section>
+
+<footer>
+  <small>此“在线版”自动加载 XLSX 库，直接导入 .xlsx/.xls；导入成功后可“一键下载嵌入数据的新页面”。</small>
+</footer>
+
+<script>
+let DATA = []; // 初始为空，导入后填充
+
+const COLS = ["序号","订货单位","船级社","发动机品牌","发动机型号","发动机功率kWm","数量","测试方式","船型"];
+const KEY_SERIAL='序号', KEY_BUYER='订货单位', KEY_CLASS='船级社', KEY_BRAND='发动机品牌',
+      KEY_MODEL='发动机型号', KEY_POWER='发动机功率kWm', KEY_QTY='数量', KEY_TEST='测试方式', KEY_SHIPTYPE='船型';
+
+let rows=[], viewRows=[], headers=[], sortState={ key:null, dir:1 };
+
+function showError(msg){ const el=document.getElementById('alert'); el.textContent=msg; el.hidden=false; }
+function clearError(){ document.getElementById('alert').hidden=true; }
+function tip(msg){ const el=document.getElementById('tip'); el.textContent=msg; el.hidden=false; }
+function clearTip(){ document.getElementById('tip').hidden=true; }
+function toNumber(x){ const n=Number(String(x??'').replace(/[^\\d.-]/g,'')); return Number.isFinite(n)?n:NaN; }
+
+function normalizeRows(list){ return list.map(o=>{ const obj={}; for(const [k,v] of Object.entries(o)) obj[(k||'').toString().trim()]=v; return obj; }).filter(o=>Object.values(o).some(v=>String(v).trim()!=="")); }
+
+function initFromData(list){
+  rows = normalizeRows(list);
+  const seen = new Set(); rows.forEach(r=>Object.keys(r).forEach(k=>seen.add(k)));
+  const others = [...seen].filter(k=>!COLS.includes(k));
+  headers = [...COLS, ...others];
+  viewRows = rows.slice();
+  fillOptions(); renderTable(); renderStats();
+}
+
+function fillOptions(){
+  const brandSet=new Set(), classSet=new Set();
+  for(const r of rows){ const b=(r[KEY_BRAND]??'').toString().trim(); const c=(r[KEY_CLASS]??'').toString().trim(); if(b) brandSet.add(b); if(c) classSet.add(c); }
+  const brandSel=document.getElementById('brandSelect'), classSel=document.getElementById('classSelect');
+  brandSel.innerHTML=[...brandSet].sort((a,b)=>a.localeCompare(b,'zh-CN')).map(v=>`<option value="${v}">${v}</option>`).join('');
+  classSel.innerHTML=[...classSet].sort((a,b)=>a.localeCompare(b,'zh-CN')).map(v=>`<option value="${v}">${v}</option>`).join('');
+  const powers=rows.map(r=>toNumber(r[KEY_POWER])).filter(n=>!isNaN(n));
+  const min=powers.length?Math.min(...powers):''; const max=powers.length?Math.max(...powers):'';
+  document.getElementById('powerMin').value=''; document.getElementById('powerMax').value='';
+  document.getElementById('powerMin').placeholder=String(min); document.getElementById('powerMax').placeholder=String(max);
+}
+
+function applyFilters(){
+  clearError(); clearTip();
+  const modelKw=document.getElementById('modelInput').value.trim().toLowerCase();
+  const minStr=document.getElementById('powerMin').value.trim();
+  const maxStr=document.getElementById('powerMax').value.trim();
+  const min=minStr?Number(minStr):-Infinity, max=maxStr?Number(maxStr):Infinity;
+  const picksB=[...document.getElementById('brandSelect').selectedOptions].map(o=>o.value);
+  const picksC=[...document.getElementById('classSelect').selectedOptions].map(o=>o.value);
+
+  viewRows = rows.filter(r => {
+    const m=(r[KEY_MODEL]??'').toString().toLowerCase();
+    if (modelKw && !m.includes(modelKw)) return false;
+    const p=toNumber(r[KEY_POWER]);
+    if (isFinite(min)||isFinite(max)) { if (isNaN(p)) return false; if (p<min || p>max) return false; }
+    if (picksB.length && !picksB.includes((r[KEY_BRAND]??'').toString())) return false;
+    if (picksC.length && !picksC.includes((r[KEY_CLASS]??'').toString())) return false;
+    return true;
+  });
+  if (sortState.key) sortBy(sortState.key, sortState.dir);
+  renderTable(); renderStats();
+}
+
+function resetFilters(){
+  document.getElementById('modelInput').value='';
+  document.getElementById('powerMin').value='';
+  document.getElementById('powerMax').value='';
+  [...document.getElementById('brandSelect').options].forEach(o=>o.selected=false);
+  [...document.getElementById('classSelect').options].forEach(o=>o.selected=false);
+  sortState={ key:null, dir:1 };
+  viewRows = rows.slice();
+  renderTable(); renderStats();
+}
+
+function renderTable(){
+  const thead=document.getElementById('tableHead');
+  thead.innerHTML = '<tr>' + headers.map(k=>`<th data-key="${k}">${k}${sortState.key===k?(sortState.dir>0?' ▲':' ▼'):''}</th>`).join('') + '</tr>';
+  const tbody=document.getElementById('tableBody');
+  tbody.innerHTML = viewRows.map(r => '<tr>' + headers.map(k => `<td>${r[k] ?? ''}</td>`).join('') + '</tr>').join('');
+  thead.onclick = e => { const th=e.target.closest('th'); if(!th) return; const key=th.dataset.key; const dir=(sortState.key===key?-sortState.dir:1); sortBy(key,dir); renderTable(); };
+}
+
+function sortBy(key, dir){
+  viewRows.sort((a,b) => {
+    const na=toNumber(a[key]), nb=toNumber(b[key]);
+    if (!isNaN(na) && !isNaN(nb)) return (na-nb)*dir;
+    return String(a[key]??'').localeCompare(String(b[key]??''),'zh-CN')*dir;
+  });
+  sortState = { key, dir };
+}
+
+function renderStats(){
+  document.getElementById('statRows').textContent = String(viewRows.length);
+  let sumQty = 0; const bAgg=new Map(), mAgg=new Map();
+  for (const r of viewRows) {
+    const q = toNumber(r[KEY_QTY]); if (!isNaN(q)) sumQty += q;
+    const b = (r[KEY_BRAND]??'').toString(); if (b) bAgg.set(b,(bAgg.get(b)||0)+(isNaN(q)?0:q));
+    const m = (r[KEY_MODEL]??'').toString(); if (m) mAgg.set(m,(mAgg.get(m)||0)+(isNaN(q)?0:q));
+  }
+  document.getElementById('statQty').textContent = String(sumQty);
+  const top = map => [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
+  document.getElementById('statBrandTop').innerHTML = top(bAgg).map(([k,v])=>`<li>${k}: ${v}</li>`).join('');
+  document.getElementById('statModelTop').innerHTML = top(mAgg).map(([k,v])=>`<li>${k}: ${v}</li>`).join('');
+}
+
+// ---- Excel/CSV 导入 ----
+function detectHeaderRow(aoa){
+  for(let i=0;i<Math.min(50, aoa.length);i++){
+    const s=(aoa[i]||[]).map(v=>(v??'')+'').join('|');
+    if (s.includes('序号') && (s.includes('机型') || s.includes('发动机') || s.includes('功率'))) return i;
+  }
+  return 0;
+}
+function parseAoA(aoa){
+  const idx = detectHeaderRow(aoa);
+  const header = aoa[idx] || [];
+  const list = aoa.slice(idx+1).map(r => {
+    const o={}; header.forEach((h,i)=>{ if(h) o[String(h).trim()] = r[i]??''; }); return o;
+  }).filter(o=>Object.values(o).some(v=>String(v).trim()!==''));
+  return list;
+}
+
+async function importFile(file){
+  clearError(); clearTip();
+  const ext = (file.name.split('.').pop()||'').toLowerCase();
+  try{
+    if (ext==='csv'){
+      const text = await file.text();
+      const rows = text.split(/\r?\n/).filter(Boolean).map(line=>{
+        const out=[]; let cur='', inQ=false;
+        for(let i=0;i<line.length;i++){
+          const ch=line[i];
+          if(ch=='"'){ if(inQ && line[i+1]=='"'){ cur+='"'; i++; } else inQ=!inQ; }
+          else if(ch==',' && !inQ){ out.push(cur); cur=''; }
+          else cur+=ch;
+        }
+        out.push(cur); return out;
+      });
+      const header = rows.shift()||[];
+      DATA = rows.map(r=>{ const o={}; header.forEach((h,i)=>{ if(h) o[h]=r[i]??''; }); return o; }).filter(o=>Object.values(o).some(v=>String(v).trim()!==''));
+    } else if (ext==='xlsx' || ext==='xls'){
+      await new Promise((resolve, reject)=>{
+        if (window.XLSX) return resolve();
+        const check = setTimeout(()=>reject(new Error('XLSX库未加载，请刷新或检查网络策略是否拦截了CDN')), 10000);
+        window.addEventListener('XLSX:ready', ()=>{ clearTimeout(check); resolve(); }, {once:true});
+      });
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type:'array' });
+      const name = wb.SheetNames.includes('中文') ? '中文' : wb.SheetNames[0];
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header:1, raw:true, defval:"" });
+      DATA = parseAoA(aoa);
+    } else { throw new Error('仅支持 .xlsx/.xls/.csv'); }
+    initFromData(DATA);
+    tip("导入成功。若需分享，可点击“下载嵌入数据的新页面”。");
+  }catch(err){
+    showError('导入失败：' + err.message);
+  }
+}
+
+// ---- 生成“嵌入当前数据”的新页面（单文件） ----
+function downloadUpdatedPage(){
+  const html = document.documentElement.outerHTML.replace(/let DATA = [\s\S]*?;[\r\n]+const COLS/, 'let DATA = ' + JSON.stringify(DATA) + ';\nconst COLS');
+  const blob = new Blob([html], {type:'text/html;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'SCR_检索_单文件_更新版.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---- 导出 CSV / 透视表 ----
+function exportCSV(rows, filename){
+  const keys = headers;
+  const csv = [keys.join(',')].concat(
+    rows.map(r => keys.map(k => {
+      const val = r[k] ?? '';
+      const s = String(val).replace(/"/g,'""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    }).join(','))
+  ).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function onExportCurrent(){ exportCSV(viewRows, '筛选结果.csv'); }
+function onExportPivot(){
+  const agg = {};
+  for (const r of viewRows){
+    const b=(r[KEY_BRAND]??'(空)').toString()||'(空)';
+    const m=(r[KEY_MODEL]??'(空)').toString()||'(空)';
+    const k=b+'||'+m;
+    const q=toNumber(r[KEY_QTY]);
+    if (!agg[k]) agg[k] = { 品牌:b, 机型:m, 数量合计:0, 记录数:0 };
+    agg[k].数量合计 += isNaN(q)?0:q;
+    agg[k].记录数 += 1;
+  }
+  const rows = Object.values(agg);
+  const keys = ["品牌","机型","数量合计","记录数"];
+  const csv = [keys.join(',')].concat(
+    rows.map(r => keys.map(k => {
+      const s = String(r[k]).replace(/"/g,'""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    }).join(','))
+  ).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '按品牌_机型_透视表.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function bootstrap(){
+  document.getElementById('applyBtn').addEventListener('click', applyFilters);
+  document.getElementById('resetBtn').addEventListener('click', resetFilters);
+  document.getElementById('exportCsvBtn').addEventListener('click', onExportCurrent);
+  document.getElementById('exportPivotBtn').addEventListener('click', onExportPivot);
+  document.getElementById('fileInput').addEventListener('change', e => e.target.files?.[0] && importFile(e.target.files[0]));
+  document.getElementById('downloadPageBtn').addEventListener('click', downloadUpdatedPage);
+}
+
+window.addEventListener('DOMContentLoaded', bootstrap);
+</script>
+</body>
+</html>
