@@ -34,10 +34,11 @@ footer{padding:12px 16px;border-top:1px solid #e2e8f0;color:#64748b}
 @media(max-width:1000px){.filters{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr 1fr}}
 </style>
 
-<!-- Auto-load SheetJS from multiple CDNs so XLSX is ready without user action -->
+<!-- 本地优先 + CDN 兜底：确保 XLSX 准备好 -->
 <script>
 (function(){
-  const CDNS=[
+  const CDNS = [
+    "./xlsx.full.min.js",  // 本地同仓库根目录优先
     "https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js",
     "https://unpkg.com/xlsx@0.20.3/dist/xlsx.full.min.js",
     "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.20.3/xlsx.full.min.js"
@@ -45,8 +46,8 @@ footer{padding:12px 16px;border-top:1px solid #e2e8f0;color:#64748b}
   let i=0;
   function next(){
     if (window.XLSX){ window.dispatchEvent(new Event('XLSX:ready')); return; }
-    if (i>=CDNS.length){ console.error("无法加载 XLSX 库，可能被网络拦截"); return; }
-    const s=document.createElement('script'); s.src=CDNS[i++];
+    if (i>=CDNS.length){ console.error("无法加载 XLSX 库"); return; }
+    const s=document.createElement('script'); s.src=CDNS[i++]; s.referrerPolicy="no-referrer";
     s.onload=()=>window.XLSX?window.dispatchEvent(new Event('XLSX:ready')):next();
     s.onerror=next;
     document.head.appendChild(s);
@@ -114,11 +115,11 @@ footer{padding:12px 16px;border-top:1px solid #e2e8f0;color:#64748b}
 </section>
 
 <footer>
-  <small>此“在线版”自动加载 XLSX 库，直接导入 .xlsx/.xls；导入成功后可“一键下载嵌入数据的新页面”。</small>
+  <small>本页自动加载 Excel 解析库（本地优先），可直接导入 .xlsx/.xls/.csv；导入成功后可“一键下载嵌入数据的新页面”。</small>
 </footer>
 
 <script>
-let DATA = []; // 初始为空，导入后填充
+let DATA = []; // 初始无内置数据，导入后填充
 
 const COLS = ["序号","订货单位","船级社","发动机品牌","发动机型号","发动机功率kWm","数量","测试方式","船型"];
 const KEY_SERIAL='序号', KEY_BUYER='订货单位', KEY_CLASS='船级社', KEY_BRAND='发动机品牌',
@@ -257,7 +258,7 @@ async function importFile(file){
     } else if (ext==='xlsx' || ext==='xls'){
       await new Promise((resolve, reject)=>{
         if (window.XLSX) return resolve();
-        const check = setTimeout(()=>reject(new Error('XLSX库未加载，请刷新或检查网络策略是否拦截了CDN')), 10000);
+        const check = setTimeout(()=>reject(new Error('XLSX库未加载，请检查本地文件或网络策略是否拦截了CDN')), 10000);
         window.addEventListener('XLSX:ready', ()=>{ clearTimeout(check); resolve(); }, {once:true});
       });
       const buf = await file.arrayBuffer();
@@ -337,8 +338,8 @@ function bootstrap(){
   document.getElementById('fileInput').addEventListener('change', e => e.target.files?.[0] && importFile(e.target.files[0]));
   document.getElementById('downloadPageBtn').addEventListener('click', downloadUpdatedPage);
 }
-
 window.addEventListener('DOMContentLoaded', bootstrap);
 </script>
 </body>
 </html>
+
